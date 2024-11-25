@@ -1,0 +1,310 @@
+// ============= ПОДКЛЮЧЕНИЕ К БАЗЕ ДАННЫХ =============
+public static class DatabaseConnection
+{
+    private static string connectionString = 
+        "Data Source=YOUR_SERVER;" +
+        "Initial Catalog=YOUR_DATABASE;" +
+        "Integrated Security=True;" +
+        "TrustServerCertificate=True";
+
+    public static SqlConnection GetConnection()
+    {
+        return new SqlConnection(connectionString);
+    }
+}
+
+// ============= ФОРМА СПИСКА =============
+// Заменить:
+// 1. EntityListForm -> Ваше название формы
+// 2. "TableName" -> Имя вашей таблицы в БД
+// 3. "ID_Column" -> Имя колонки ID в вашей таблице
+// 4. EntityForm -> Имя вашей формы редактирования
+public partial class EntityListForm : Form
+{
+    public EntityListForm()
+    {
+        InitializeComponent();
+        LoadData();
+    }
+
+    private void LoadData()
+    {
+        try
+        {
+            using (var conn = DatabaseConnection.GetConnection())
+            {
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT * FROM TableName";
+                    using (var adapter = new SqlDataAdapter(cmd))
+                    {
+                        var dt = new DataTable();
+                        adapter.Fill(dt);
+                        dataGridView1.DataSource = dt;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Ошибка при загрузке данных: {ex.Message}", "Ошибка", 
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void btnAdd_Click(object sender, EventArgs e)
+    {
+        var form = new EntityForm();
+        if (form.ShowDialog() == DialogResult.OK)
+        {
+            LoadData();
+        }
+    }
+
+    private void btnEdit_Click(object sender, EventArgs e)
+    {
+        if (dataGridView1.CurrentRow == null) return;
+
+        int id = Convert.ToInt32(dataGridView1.CurrentRow.Cells["ID_Column"].Value);
+        var form = new EntityForm(id);
+        if (form.ShowDialog() == DialogResult.OK)
+        {
+            LoadData();
+        }
+    }
+
+    private void btnDelete_Click(object sender, EventArgs e)
+    {
+        if (dataGridView1.CurrentRow == null) return;
+
+        if (MessageBox.Show("Удалить запись?", "Подтверждение", 
+            MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+        {
+            try
+            {
+                int id = Convert.ToInt32(dataGridView1.CurrentRow.Cells["ID_Column"].Value);
+                using (var conn = DatabaseConnection.GetConnection())
+                {
+                    conn.Open();
+                    using (var cmd = conn.CreateCommand())
+                    {
+                        cmd.CommandText = "DELETE FROM TableName WHERE ID_Column = @Id";
+                        cmd.Parameters.AddWithValue("@Id", id);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+                LoadData();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка при удалении: {ex.Message}", "Ошибка", 
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+    }
+
+    private void btnRefresh_Click(object sender, EventArgs e)
+    {
+        LoadData();
+    }
+}
+
+// ============= ФОРМА РЕДАКТИРОВАНИЯ =============
+// Заменить:
+// 1. EntityForm -> Ваше название формы
+// 2. "TableName" -> Имя вашей таблицы в БД
+// 3. "ID_Column" -> Имя колонки ID в вашей таблице
+// 4. Добавить параметры для ваших полей в SQL-запросы
+public partial class EntityForm : Form
+{
+    private int? entityId;
+
+    public EntityForm(int? id = null)
+    {
+        entityId = id;
+        InitializeComponent();
+        if (entityId.HasValue)
+        {
+            LoadData();
+            this.Text = "Редактирование записи";
+        }
+    }
+
+    private void LoadData()
+    {
+        try
+        {
+            using (var conn = DatabaseConnection.GetConnection())
+            {
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = "SELECT * FROM TableName WHERE ID_Column = @Id";
+                    cmd.Parameters.AddWithValue("@Id", entityId.Value);
+
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        if (reader.Read())
+                        {
+                            // Загрузите данные в ваши поля
+                            // textBox1.Text = reader.GetString(reader.GetOrdinal("Column1"));
+                            // numericUpDown1.Value = reader.GetDecimal(reader.GetOrdinal("Column2"));
+                            // comboBox1.SelectedItem = reader.GetString(reader.GetOrdinal("Column3"));
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Ошибка при загрузке данных: {ex.Message}", "Ошибка", 
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void btnSave_Click(object sender, EventArgs e)
+    {
+        if (!ValidateData()) return;
+
+        try
+        {
+            using (var conn = DatabaseConnection.GetConnection())
+            {
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
+                {
+                    if (entityId.HasValue)
+                    {
+                        cmd.CommandText = @"UPDATE TableName 
+                            SET Column1 = @Value1,
+                                Column2 = @Value2,
+                                Column3 = @Value3
+                            WHERE ID_Column = @Id";
+                        cmd.Parameters.AddWithValue("@Id", entityId.Value);
+                    }
+                    else
+                    {
+                        cmd.CommandText = @"INSERT INTO TableName 
+                            (ID_Column, Column1, Column2, Column3) 
+                            VALUES ((SELECT ISNULL(MAX(ID_Column), 0) + 1 FROM TableName), 
+                                    @Value1, @Value2, @Value3)";
+                    }
+
+                    // Добавьте параметры для ваших полей
+                    // cmd.Parameters.AddWithValue("@Value1", textBox1.Text);
+                    // cmd.Parameters.AddWithValue("@Value2", numericUpDown1.Value);
+                    // cmd.Parameters.AddWithValue("@Value3", comboBox1.SelectedItem.ToString());
+
+                    cmd.ExecuteNonQuery();
+                }
+            }
+
+            MessageBox.Show(entityId.HasValue ? "Запись обновлена!" : "Запись добавлена!", 
+                "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            this.DialogResult = DialogResult.OK;
+            this.Close();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Ошибка при сохранении: {ex.Message}", "Ошибка", 
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private bool ValidateData()
+    {
+        // Добавьте проверку ваших полей
+        // if (string.IsNullOrWhiteSpace(textBox1.Text))
+        // {
+        //     MessageBox.Show("Заполните обязательные поля!", "Ошибка", 
+        //         MessageBoxButtons.OK, MessageBoxIcon.Error);
+        //     return false;
+        // }
+        return true;
+    }
+
+    private void btnCancel_Click(object sender, EventArgs e)
+    {
+        this.DialogResult = DialogResult.Cancel;
+        this.Close();
+    }
+}
+
+// ============= ФОРМА АВТОРИЗАЦИИ =============
+// Заменить:
+// 1. "TableName" -> Имя таблицы с пользователями
+// 2. "Login_Column" и "Password_Column" -> Имена колонок для логина и пароля
+// 3. "Role_Column" -> Имя колонки с ролью
+// 4. "Admin_Role" -> Название роли администратора
+public partial class AuthForm : Form
+{
+    public AuthForm()
+    {
+        InitializeComponent();
+    }
+
+    private void btnLogin_Click(object sender, EventArgs e)
+    {
+        string username = txtUsername.Text.Trim();
+        string password = txtPassword.Text.Trim();
+
+        if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
+        {
+            ShowError("Введите логин и пароль");
+            return;
+        }
+
+        try
+        {
+            using (var conn = DatabaseConnection.GetConnection())
+            {
+                conn.Open();
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = @"SELECT Role_Column 
+                                      FROM TableName 
+                                      WHERE Login_Column = @Login 
+                                      AND Password_Column = @Password";
+                    cmd.Parameters.AddWithValue("@Login", username);
+                    cmd.Parameters.AddWithValue("@Password", password);
+
+                    var result = cmd.ExecuteScalar();
+
+                    if (result != null)
+                    {
+                        string role = result.ToString();
+                        if (role == "Admin_Role")
+                        {
+                            MainForm mainForm = new MainForm();
+                            this.Hide();
+                            mainForm.ShowDialog();
+                            this.Close();
+                        }
+                        else
+                        {
+                            ShowError("Недостаточно прав для входа");
+                        }
+                    }
+                    else
+                    {
+                        ShowError("Неверный логин или пароль");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Ошибка при авторизации: {ex.Message}", "Ошибка",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void ShowError(string message)
+    {
+        lblError.Text = message;
+        lblError.Visible = true;
+        txtPassword.Text = "";
+        txtPassword.Focus();
+    }
+} 
